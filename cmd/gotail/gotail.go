@@ -57,6 +57,7 @@ func tailFile(filename string, config tail.Config, done chan bool) {
 		return
 	}
 	for line := range t.Lines {
+		//fmt.Printf("{Offset: %v, Text: %v}\n", line.Offset, line.Text)
 		fmt.Println(line.Text)
 	}
 	err = t.Wait()

@@ -26,14 +26,15 @@ var (
 )
 
 type Line struct {
-	Text string
-	Time time.Time
-	Err  error // Error from tail
+	Offset int64
+	Text   string
+	Time   time.Time
+	Err    error // Error from tail
 }
 
 // NewLine returns a Line with present time.
-func NewLine(text string) *Line {
-	return &Line{text, time.Now(), nil}
+func NewLine(text string, offset int64) *Line {
+	return &Line{offset, text, time.Now(), nil}
 }
 
 // SeekInfo represents arguments to `os.Seek`
@@ -269,13 +270,13 @@ func (tail *Tail) tailFileSync() {
 
 		// Process `line` even if err is EOF.
 		if err == nil {
-			cooloff := !tail.sendLine(line)
+			cooloff := !tail.sendLine(line, offset)
 			if cooloff {
 				// Wait a second before seeking till the end of
 				// file when rate limit is reached.
 				msg := ("Too much log activity; waiting a second " +
 					"before resuming tailing")
-				tail.Lines <- &Line{msg, time.Now(), errors.New(msg)}
+				tail.Lines <- &Line{-1, msg, time.Now(), errors.New(msg)}
 				select {
 				case <-time.After(time.Second):
 				case <-tail.Dying():
@@ -289,7 +290,7 @@ func (tail *Tail) tailFileSync() {
 		} else if err == io.EOF {
 			if !tail.Follow {
 				if line != "" {
-					tail.sendLine(line)
+					tail.sendLine(line, offset)
 				}
 				return
 			}
@@ -404,9 +405,10 @@ func (tail *Tail) seekTo(pos SeekInfo) error {
 
 // sendLine sends the line(s) to Lines channel, splitting longer lines
 // if necessary. Return false if rate limit is reached.
-func (tail *Tail) sendLine(line string) bool {
+func (tail *Tail) sendLine(line string, offset int64) bool {
 	now := time.Now()
 	lines := []string{line}
+	off := offset
 
 	// Split longer lines
 	if tail.MaxLineSize > 0 && len(line) > tail.MaxLineSize {
@@ -414,7 +416,8 @@ func (tail *Tail) sendLine(line string) bool {
 	}
 
 	for _, line := range lines {
-		tail.Lines <- &Line{line, now, nil}
+		tail.Lines <- &Line{off, line, now, nil}
+		off += int64(len(line))
 	}
 
 	if tail.Config.RateLimiter != nil {
